@@ -33,7 +33,9 @@ class Config:
 
 
 def load() -> Config:
-    e = os.environ.get
+    def e(key: str, default: str = "") -> str:
+        # Render maydoniga qo'yilganda qo'shilib qolgan probel/yangi qator/qo'shtirnoqlarni olib tashlaymiz
+        return os.environ.get(key, default).strip().strip("\"'").strip()
     return Config(
         bot_token=e("BOT_TOKEN", ""),
         db_channel_id=int(e("DB_CHANNEL_ID", "0") or 0),

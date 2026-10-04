@@ -194,3 +194,15 @@ def test_router_builds_with_admin_panel():
     r = build_router(ctx)
     names = {h.callback.__name__ for o in r.observers.values() for h in o.handlers}
     assert {"admin_cmd", "adm_cb", "adm_input", "selftest", "stats"} <= names
+
+
+def test_env_values_are_stripped(monkeypatch):
+    import config
+    monkeypatch.setenv("AI_API_KEY", "gsk_abc123\n")
+    monkeypatch.setenv("AI_MODEL", ' "openai/gpt-oss-120b" ')
+    monkeypatch.setenv("AI_BASE_URL", "https://api.groq.com/openai/v1/\r\n")
+    monkeypatch.setenv("APIFY_TOKEN", "\tapify_api_x \n")
+    monkeypatch.setenv("BOT_TOKEN", "123:abc\n")
+    c = config.load()
+    assert c.ai_key == "gsk_abc123" and c.ai_model == "openai/gpt-oss-120b"
+    assert c.ai_base_url == "https://api.groq.com/openai/v1" and c.apify_token == "apify_api_x" and c.bot_token == "123:abc"

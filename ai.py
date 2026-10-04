@@ -54,7 +54,7 @@ async def generate(cfg, request: str, avoid: list[str]) -> list[str]:
             {"role": "user", "content": f"Request: {request[:500]}\nAvoid: {', '.join(avoid[:80])}"},
         ],
     }
-    headers = {"Authorization": f"Bearer {cfg.ai_key}"} if cfg.ai_key else {}
+    headers = {"Authorization": f"Bearer {cfg.ai_key.strip()}"} if cfg.ai_key.strip() else {}
     async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=90)) as s:
         async with s.post(f"{cfg.ai_base_url}/chat/completions", json=body, headers=headers) as r:
             if r.status != 200:
