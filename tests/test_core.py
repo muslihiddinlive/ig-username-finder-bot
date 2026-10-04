@@ -206,3 +206,52 @@ def test_env_values_are_stripped(monkeypatch):
     c = config.load()
     assert c.ai_key == "gsk_abc123" and c.ai_model == "openai/gpt-oss-120b"
     assert c.ai_base_url == "https://api.groq.com/openai/v1" and c.apify_token == "apify_api_x" and c.bot_token == "123:abc"
+
+
+def test_apify_budget_refunded_on_failure_and_spent_on_success(monkeypatch):
+    import checkers
+
+    class Resp:
+        def __init__(self, status, payload):
+            self.status, self.payload = status, payload
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def text(self):
+            return "payment required"
+
+        async def json(self):
+            return self.payload
+
+    state = {"status": 402, "payload": None}
+
+    class Sess:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def post(self, *a, **k):
+            return Resp(state["status"], state["payload"])
+
+    monkeypatch.setattr(checkers.aiohttp, "ClientSession", Sess)
+    store = Store()
+    ck = checkers.ApifyChecker("tok", "a/b", 100, store)
+    with pytest.raises(checkers.CheckerError):
+        asyncio.run(ck.check_batch(["aa", "bb"]))
+    assert store.apify_left(100) == 100                      # muvaffaqiyatsiz so'rov byudjetni yemaydi
+    state.update(status=200, payload=[{"username": "aa", "platform": "Instagram", "available": True}])
+    res = asyncio.run(ck.check_batch(["aa", "bb"]))
+    assert res == {"aa": FREE, "bb": UNKNOWN} and store.apify_left(100) == 98
+    p = Pipeline([ck])
+    state.update(status=500, payload=None)
+    out = asyncio.run(p.check(["aa"]))
+    assert out["aa"] == (UNKNOWN, False) and "500" in p.last_error

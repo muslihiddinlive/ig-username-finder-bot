@@ -112,8 +112,9 @@ class Searcher:
         self.active[uid] = job
         price = self.store.price_for(uid)
         msg = await bot.send_message(chat_id, f"🔎 {title}\nBoshlanmoqda… To'xtatish uchun pastdagi tugmani bosing.", reply_markup=STOP_KB)
-        checked = found = unknown_streak = charged = 0
+        checked = unknown = processed = found = unknown_streak = charged = 0
         reason = "nomzodlar tugadi"
+        detail = ""
         it = batches.__aiter__()
         try:
             async with self.sem:
@@ -132,8 +133,11 @@ class Searcher:
                     if res is _STOPPED:
                         reason = "to'xtatildi"
                         break
-                    checked += len(batch)
-                    n_unknown = 0
+                    processed += len(batch)
+                    conclusive = sum(1 for st, v in res.values() if st == TAKEN or (st == FREE and v))
+                    checked += conclusive
+                    n_unknown = len(batch) - conclusive
+                    unknown += n_unknown
                     for name, (st, verified) in res.items():
                         if job.stop:
                             reason, done = "to'xtatildi", True
@@ -150,23 +154,22 @@ class Searcher:
                             if max_found and found >= max_found:
                                 reason, done = "so'ralgan miqdor topildi", True
                                 break
-                        elif st == UNKNOWN or not verified:
-                            n_unknown += 1
                     if done:
                         break
                     unknown_streak = unknown_streak + 1 if n_unknown == len(batch) else 0
                     if unknown_streak >= 3:
                         reason = "tekshiruv xizmati javob bermayapti"
+                        detail = self.pipeline.last_error
                         break
                     if price and self.store.balance(uid) < price:
                         reason = "balans tugadi"
                         break
-                    if checked >= self.cfg.max_checks:
+                    if processed >= self.cfg.max_checks:
                         reason = "tekshiruv limiti tugadi"
                         break
                     with contextlib.suppress(TelegramBadRequest):
                         await bot.edit_message_text(
-                            f"🔎 {title}\nTekshirildi: {checked} | Topildi: {found}\nBalans: {self._bal(uid)}",
+                            f"🔎 {title}\nTekshirildi: {checked} | Noma'lum: {unknown} | Topildi: {found}\nBalans: {self._bal(uid)}",
                             chat_id=chat_id, message_id=msg.message_id)
         except Exception as e:  # noqa: BLE001
             log.exception("qidiruv xatosi")
@@ -178,8 +181,9 @@ class Searcher:
                 with contextlib.suppress(Exception):
                     await aclose()
         with contextlib.suppress(TelegramBadRequest):
-            await bot.edit_message_text(f"🏁 {title}\nTekshirildi: {checked} | Topildi: {found}", chat_id=chat_id, message_id=msg.message_id)
+            await bot.edit_message_text(f"🏁 {title}\nTekshirildi: {checked} | Noma'lum: {unknown} | Topildi: {found}", chat_id=chat_id, message_id=msg.message_id)
         await bot.send_message(
             chat_id,
-            f"Qidiruv yakunlandi: {reason}.\nTopildi: {found} ta, yechildi: {charged}⭐\nBalans: {self._bal(uid)}",
+            f"Qidiruv yakunlandi: {reason}.\nAniq tekshirildi: {checked}, noma'lum: {unknown}\nTopildi: {found} ta, yechildi: {charged}⭐\nBalans: {self._bal(uid)}"
+            + (f"\n🔧 Sabab (adminlar uchun): {html.escape(detail)}" if detail and self.store.is_admin(uid) else ""),
             reply_markup=ReplyKeyboardRemove())

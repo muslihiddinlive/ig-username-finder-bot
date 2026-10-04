@@ -129,7 +129,7 @@ class Store:
         return max(0, budget - a["used"])
 
     def apify_spend(self, n: int):
-        self.d["apify"]["used"] += n
+        self.d["apify"]["used"] = max(0, self.d["apify"]["used"] + n)
         self._touch()
 
     # --- to'lovlar (dublikatdan himoya)

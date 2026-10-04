@@ -48,7 +48,7 @@ class FakeSession(BaseSession):
 
 
 class Env:
-    def __init__(self, uid=5, superadmins=(), balance=10, price=1, free=(), cfg=None, delay=0):
+    def __init__(self, uid=5, superadmins=(), balance=10, price=1, free=(), cfg=None, delay=0, fail=False):
         self.uid = uid
         self.cfg = cfg or mkcfg()
         self.store = Store(set(superadmins))
@@ -58,6 +58,8 @@ class Env:
         fr = set(free)
 
         async def cb(names):
+            if fail:
+                raise RuntimeError('apify HTTP 402: kredit tugagan')
             if delay:
                 await asyncio.sleep(delay)
             return {n: (FREE if n in fr else TAKEN) for n in names}
@@ -245,3 +247,22 @@ def test_stop_button_without_active_search_and_budget_message():
         last = [c for c in e.session.calls if type(c).__name__ == "SendMessage"][-1]
         assert "Faol qidiruv yo'q" in last.text and isinstance(last.reply_markup, ReplyKeyboardRemove)
     run(go())
+
+
+def test_checker_failure_is_reported_to_admin_not_user_and_not_counted_as_checked():
+    async def go(uid, sup):
+        e = Env(uid=uid, superadmins=sup, balance=5, fail=True)
+        await e.say("/start")
+        await e.press("menu:search")
+        await e.press("m:starts")
+        await e.say("uz")
+        await e.press("lim:custom")
+        await e.say("5")
+        await e.press("cs:digit")
+        await e.press("cs:go")
+        await e.wait_search()
+        return e.session.texts()[-1], e.store.balance(uid)
+    admin_text, _ = run(go(5, {5}))
+    assert "Aniq tekshirildi: 0" in admin_text and "402" in admin_text and "Sabab" in admin_text
+    user_text, bal = run(go(6, set()))
+    assert "Aniq tekshirildi: 0" in user_text and "402" not in user_text and bal == 5

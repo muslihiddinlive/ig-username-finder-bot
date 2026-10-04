@@ -33,12 +33,16 @@ class ApifyChecker:
         url = f"https://api.apify.com/v2/acts/{self.actor}/run-sync-get-dataset-items"
         body = {"usernames": ",".join(names), "platforms": "instagram", "concurrency": 10, "delayBetweenRequests": 0.3}
         async with self._sem:
-            self.store.apify_spend(len(names))
-            async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as s:
-                async with s.post(url, json=body, headers={"Authorization": f"Bearer {self.token}"}) as r:
-                    if r.status not in (200, 201):
-                        raise CheckerError(f"apify HTTP {r.status}: {(await r.text())[:200]}")
-                    items = await r.json()
+            self.store.apify_spend(len(names))  # oldindan band qilamiz, xato bo'lsa qaytaramiz
+            try:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as s:
+                    async with s.post(url, json=body, headers={"Authorization": f"Bearer {self.token}"}) as r:
+                        if r.status not in (200, 201):
+                            raise CheckerError(f"apify HTTP {r.status}: {(await r.text())[:120]}")
+                        items = await r.json()
+            except BaseException:
+                self.store.apify_spend(-len(names))
+                raise
         return parse_apify_items(items, names)
 
 
@@ -97,6 +101,7 @@ class Pipeline:
 
     def __init__(self, checkers: list):
         self.checkers = checkers
+        self.last_error = ""
 
     def has_verifier(self, n: int) -> bool:
         """Kamida bitta ishonchli (tasdiqlovchi) tekshiruvchi hozir ishlay oladimi."""
@@ -111,11 +116,13 @@ class Pipeline:
             if not pending:
                 break
             if ck.authoritative and not ck.available(len(pending)):
+                self.last_error = f"{ck.name}: byudjet tugagan yoki token yo'q"
                 continue
             try:
                 res = await ck.check_batch(pending)
             except Exception as e:
                 log.warning("%s xato: %s", ck.name, e)
+                self.last_error = f"{ck.name}: {str(e)[:150]}"
                 continue
             nxt = []
             for n in pending:
