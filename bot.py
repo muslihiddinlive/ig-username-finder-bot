@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import html
+import logging
 import re
 import secrets
 import time
 from dataclasses import dataclass, field
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
+from aiogram.types.error_event import ErrorEvent
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message,
                            PreCheckoutQuery, ReplyKeyboardRemove)
@@ -18,6 +20,7 @@ from storage import probe_channel
 from generator import SearchSpec, normalize_word, is_valid_username
 from search import STOP_TEXT, Searcher, ai_batches, spec_batches
 
+log = logging.getLogger(__name__)
 ANY_FREE_SLOTS = (2, 3, 4)
 TYPE_LABELS = {"letter": "Harf (a-z)", "digit": "Raqam", "us": "_ pastki chiziq", "dot": ". nuqta"}
 
@@ -70,6 +73,37 @@ def build_router(ctx: Ctx) -> Router:
                                   reply_markup=menu_kb(True))
         await m.answer(f"Salom! Balans: <b>{u['balance']}⭐</b>\nBitta topilgan bo'sh username: <b>{price()}⭐</b> "
                        f"(topilmasa pul yechilmaydi).", reply_markup=menu_kb(st.is_vip(uid)))
+
+    err_state = {"t": 0.0}
+
+    @r.errors()
+    async def on_error(event: ErrorEvent, bot: Bot):
+        """Handler yiqilsa jim qolmaymiz: foydalanuvchiga aytamiz, superadminlarga xato matnini yuboramiz."""
+        exc = event.exception
+        log.error("Handler xatosi: %r", exc, exc_info=exc)
+        upd = event.update
+        chat_id = None
+        if upd.message:
+            chat_id = upd.message.chat.id
+        elif upd.callback_query and upd.callback_query.message:
+            chat_id = upd.callback_query.message.chat.id
+            try:
+                await upd.callback_query.answer("⚠️ Xato yuz berdi", show_alert=True)
+            except Exception:  # noqa: BLE001
+                pass
+        if chat_id:
+            try:
+                await bot.send_message(chat_id, "⚠️ Ichki xato yuz berdi. Adminga xabar yuborildi, birozdan keyin qayta urinib ko'ring.")
+            except Exception:  # noqa: BLE001
+                pass
+        if time.time() - err_state["t"] > 30:
+            err_state["t"] = time.time()
+            for sid in st.superadmins:
+                try:
+                    await bot.send_message(sid, f"⚠️ Xato: <code>{html.escape(type(exc).__name__ + ': ' + str(exc))[:600]}</code>")
+                except Exception:  # noqa: BLE001
+                    pass
+        return True
 
     @r.message(CommandStart())
     async def start(m: Message, state: FSMContext):

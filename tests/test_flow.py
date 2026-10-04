@@ -277,3 +277,19 @@ def test_diag_panel_button_and_command():
         diags = [t for t in e.session.texts() if "Diagnostika" in t]
         assert len(diags) == 2 and "Apify oy limiti qoldi" in diags[0]
     run(go())
+
+
+def test_handler_crash_is_not_silent():
+    async def go():
+        e = Env(uid=5, superadmins={5})
+        e.store.menu_boom = True
+
+        def boom(uid):
+            raise RuntimeError("sinov xatosi")
+
+        e.store.is_vip = boom   # /start ichida chaqiriladi
+        e.store.is_superadmin = lambda uid: False
+        await e.say("/start")
+        texts = e.session.texts()
+        assert any("Ichki xato" in t for t in texts)
+    run(go())

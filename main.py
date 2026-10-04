@@ -1,11 +1,14 @@
 import asyncio
+import contextlib
 import logging
+import os
 import time
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
+import aiohttp
 from aiohttp import web
 
 from bot import Ctx, build_router
@@ -23,6 +26,16 @@ def build_checkers(cfg, store):
         elif name == "apify":
             out.append(ApifyChecker(cfg.apify_token, cfg.apify_actor, cfg.apify_monthly_budget, store))
     return out
+
+
+async def keepalive(url: str):
+    """Render free xizmati 15 daqiqa trafiksiz qolsa uxlaydi: o'zimiz o'z /health manzilimizga so'rov yuboramiz."""
+    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=20)) as s:
+        while True:
+            await asyncio.sleep(600)
+            with contextlib.suppress(Exception):
+                async with s.get(url.rstrip("/") + "/health") as r:
+                    await r.read()
 
 
 async def main():
@@ -55,11 +68,21 @@ async def main():
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(build_router(ctx))
 
+    with contextlib.suppress(Exception):
+        await bot.delete_webhook(drop_pending_updates=False)  # eski webhook polling'ni to'sib qo'ymasin
+    ver = os.environ.get("RENDER_GIT_COMMIT", "")[:7] or "lokal"
+    for sid in cfg.superadmins:
+        with contextlib.suppress(Exception):
+            await bot.send_message(sid, f"🟢 Bot ishga tushdi (versiya {ver})\nDB manbasi: {persist.source}")
+    ext = os.environ.get("RENDER_EXTERNAL_URL")
+    ka = asyncio.create_task(keepalive(ext)) if ext else None
     task = asyncio.create_task(persist.run())
     try:
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         task.cancel()
+        if ka:
+            ka.cancel()
         await persist.flush()
         await bot.session.close()
         await runner.cleanup()
