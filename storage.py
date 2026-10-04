@@ -158,6 +158,9 @@ class ChannelPersistence:
         self.interval, self.local_path = interval, local_path
         self.snap_id: int | None = None
         self._lock = asyncio.Lock()
+        self.source = "yuklanmagan"
+        self.last_ok = 0
+        self.last_error = ""
 
     async def load(self) -> str:
         if self.channel_id:
@@ -168,15 +171,32 @@ class ChannelPersistence:
                     buf = await self.bot.download(pm.document.file_id)
                     self.store.load_json(buf.read().decode())
                     self.snap_id = pm.message_id
+                    self.source = "kanal (pinned snapshot)"
                     return "channel"
-            except Exception:
+                self.source = "yangi (kanalda pinned snapshot topilmadi)"
+            except Exception as e:
                 log.exception("kanaldan snapshot o'qilmadi")
+                self.last_error = f"o'qish: {e}"[:200]
+                self.source = "yangi (kanalni o'qib bo'lmadi)"
         if os.path.exists(self.local_path):
             self.store.load_json(open(self.local_path, encoding="utf-8").read())
+            self.source = "lokal fayl"
             return "local"
+        if not self.channel_id:
+            self.source = "yangi (DB_CHANNEL_ID sozlanmagan)"
         return "fresh"
 
-    async def flush(self):
+    async def flush(self) -> bool:
+        try:
+            await self._flush()
+            self.last_ok = int(time.time())
+            return True
+        except Exception as e:  # noqa: BLE001
+            log.exception("snapshot yozilmadi")
+            self.last_error = f"yozish: {e}"[:200]
+            return False
+
+    async def _flush(self):
         from aiogram.types import BufferedInputFile
 
         async with self._lock:

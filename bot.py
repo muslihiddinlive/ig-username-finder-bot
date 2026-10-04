@@ -344,6 +344,24 @@ def build_router(ctx: Ctx) -> Router:
                 f"Apify oy limiti qoldi: {st.apify_left(cfg.apify_monthly_budget)}\n"
                 f"Band keshi: {len(st.d['taken'])}\nFaol qidiruvlar: {len(ctx.searcher.active)}")
 
+    def diag_text() -> str:
+        p = ctx.persist
+        L = ["🔍 <b>Diagnostika</b>"]
+        if p is not None:
+            L.append(f"DB manbasi (startda): {html.escape(p.source)}")
+            L.append("Kanal ID: " + ("sozlangan" if p.channel_id else "<b>YO'Q</b> (faqat lokal fayl, restartda yo'qoladi!)"))
+            L.append("Oxirgi muvaffaqiyatli snapshot: " + (time.strftime("%F %T", time.gmtime(p.last_ok)) + " UTC" if p.last_ok else "hali yo'q"))
+            if p.last_error:
+                L.append(f"Snapshot xatosi: {html.escape(p.last_error)}")
+        for ck in ctx.pipeline.checkers:
+            L.append(f"\n<b>{ck.name}</b>" + (" (tasdiqlovchi)" if ck.authoritative else " (taxminiy)"))
+            dbg = getattr(ck, "last_debug", "")
+            if dbg:
+                L.append("so'nggi javob: <code>" + html.escape(dbg[:700]) + "</code>")
+        L.append(f"\nPipeline oxirgi xato: {html.escape(ctx.pipeline.last_error or '-')}")
+        L.append(f"Apify oy limiti qoldi: {st.apify_left(cfg.apify_monthly_budget)}")
+        return "\n".join(L)
+
     async def do_selftest(m: Message):
         """Tekshiruv aniqligini sinash: mashhur (band) va tasodifiy uzun (bo'sh bo'lishi kerak) nomlar."""
         taken = ["instagram", "cristiano", "google", "nike"]
@@ -355,11 +373,18 @@ def build_router(ctx: Ctx) -> Router:
 
         lines = [f"{'✅' if ok(n) else '❌'} {n}: {res[n][0]}{' (tasdiqlangan)' if res[n][1] else ''}" for n in taken + free]
         await m.answer("Selftest (kutilgan: birinchi 4 ta taken, oxirgi 2 ta free):\n" + "\n".join(lines))
+        if any(res[n][0] == "unknown" for n in res):
+            await m.answer(diag_text())
 
     @r.message(Command("stats"))
     async def stats(m: Message):
         if adm(m):
             await m.answer(stats_text())
+
+    @r.message(Command("diag"))
+    async def diag(m: Message):
+        if adm(m):
+            await m.answer(diag_text())
 
     @r.message(Command("selftest"))
     async def selftest(m: Message):
@@ -388,6 +413,7 @@ def build_router(ctx: Ctx) -> Router:
 
     def panel_kb(uid: int):
         rows = [[("📊 Statistika", "adm:stats"), ("🧪 Selftest", "adm:selftest")],
+                [("🔍 Diagnostika", "adm:diag")],
                 [("💲 Narx", "adm:price"), ("📦 Paketlar", "adm:packages")],
                 [("➕ Balans berish", "adm:grant")]]
         if st.is_superadmin(uid):
@@ -413,6 +439,8 @@ def build_router(ctx: Ctx) -> Router:
             return await c.message.answer(stats_text())
         if act == "selftest":
             return await do_selftest(c.message)
+        if act == "diag":
+            return await c.message.answer(diag_text())
         if act == "admins":
             lst = ", ".join(str(a) for a in st.d["admins"]) or "yo'q"
             return await c.message.answer(f"Superadminlar: {sorted(st.superadmins)}\nAdminlar: {lst}",

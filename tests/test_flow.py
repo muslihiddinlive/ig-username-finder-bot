@@ -266,3 +266,14 @@ def test_checker_failure_is_reported_to_admin_not_user_and_not_counted_as_checke
     assert "Aniq tekshirildi: 0" in admin_text and "402" in admin_text and "Sabab" in admin_text
     user_text, bal = run(go(6, set()))
     assert "Aniq tekshirildi: 0" in user_text and "402" not in user_text and bal == 5
+
+
+def test_diag_panel_button_and_command():
+    async def go():
+        e = Env(uid=5, superadmins={5})
+        await e.say("/diag")
+        await e.say("/admin")
+        await e.press("adm:diag")
+        diags = [t for t in e.session.texts() if "Diagnostika" in t]
+        assert len(diags) == 2 and "Apify oy limiti qoldi" in diags[0]
+    run(go())

@@ -251,7 +251,64 @@ def test_apify_budget_refunded_on_failure_and_spent_on_success(monkeypatch):
     state.update(status=200, payload=[{"username": "aa", "platform": "Instagram", "available": True}])
     res = asyncio.run(ck.check_batch(["aa", "bb"]))
     assert res == {"aa": FREE, "bb": UNKNOWN} and store.apify_left(100) == 98
+    assert "elementlar=1" in ck.last_debug and "aa" in ck.last_debug
     p = Pipeline([ck])
     state.update(status=500, payload=None)
     out = asyncio.run(p.check(["aa"]))
     assert out["aa"] == (UNKNOWN, False) and "500" in p.last_error
+
+
+def test_channel_persistence_roundtrip_with_fake_bot(tmp_path):
+    import io
+    from storage import ChannelPersistence
+
+    class Doc:
+        file_id = "f1"
+
+    class Pm:
+        document = Doc()
+        message_id = 11
+
+    class FakeTgBot:
+        def __init__(self):
+            self.blob = None
+            self.pinned = None
+            self.deleted = []
+            self.n = 10
+
+        async def send_document(self, chat_id, doc, **kw):
+            self.blob = doc.data
+            self.n += 1
+            return type("M", (), {"message_id": self.n})()
+
+        async def pin_chat_message(self, chat_id, mid, **kw):
+            self.pinned = type("Pm", (), {"document": Doc(), "message_id": mid})()
+
+        async def delete_message(self, chat_id, mid):
+            self.deleted.append(mid)
+
+        async def get_chat(self, chat_id):
+            return type("C", (), {"pinned_message": self.pinned})()
+
+        async def download(self, file_id):
+            return io.BytesIO(self.blob)
+
+        async def send_message(self, *a, **k):
+            return None
+
+    async def go():
+        bot = FakeTgBot()
+        s1 = Store()
+        s1.credit(42, 77)
+        s1.mark_taken("abc")
+        p1 = ChannelPersistence(bot, -100123, s1, local_path=str(tmp_path / "a.json"))
+        assert await p1.flush() and p1.last_ok
+        s2 = Store()
+        p2 = ChannelPersistence(bot, -100123, s2, local_path=str(tmp_path / "b.json"))
+        assert await p2.load() == "channel" and p2.source.startswith("kanal")
+        assert s2.balance(42) == 77 and s2.is_taken("abc")
+        s3 = Store()
+        p3 = ChannelPersistence(FakeTgBot(), 0, s3, local_path=str(tmp_path / "none.json"))
+        assert await p3.load() == "fresh" and "DB_CHANNEL_ID" in p3.source
+
+    asyncio.run(go())

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import random
@@ -23,6 +24,7 @@ class ApifyChecker:
     def __init__(self, token: str, actor: str, budget: int, store):
         self.token, self.actor, self.budget, self.store = token, actor.replace("/", "~"), budget, store
         self._sem = asyncio.Semaphore(2)
+        self.last_debug = ""
 
     def available(self, n: int) -> bool:
         return bool(self.token) and self.store.apify_left(self.budget) >= n
@@ -38,8 +40,13 @@ class ApifyChecker:
                 async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=300)) as s:
                     async with s.post(url, json=body, headers={"Authorization": f"Bearer {self.token}"}) as r:
                         if r.status not in (200, 201):
-                            raise CheckerError(f"apify HTTP {r.status}: {(await r.text())[:120]}")
+                            body_txt = (await r.text())[:200]
+                            self.last_debug = f"HTTP {r.status}: {body_txt}"
+                            raise CheckerError(f"apify HTTP {r.status}: {body_txt[:120]}")
                         items = await r.json()
+                        sample = items[:3] if isinstance(items, list) else items
+                        self.last_debug = (f"HTTP {r.status}; elementlar={len(items) if isinstance(items, list) else type(items).__name__}"
+                                           f"; namuna={json.dumps(sample, ensure_ascii=False)[:500]}")
             except BaseException:
                 self.store.apify_spend(-len(names))
                 raise
