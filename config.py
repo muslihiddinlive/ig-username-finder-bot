@@ -39,6 +39,9 @@ class Config:
     ai_rounds: int
     port: int
     startup_grace: int
+    apify_concurrency: int = 3
+    apify_delay: float = 1.5
+    apify_proxy: bool = False
 
 
 def load() -> Config:
@@ -64,4 +67,7 @@ def load() -> Config:
         ai_rounds=int(e("AI_ROUNDS", "3")),
         port=int(e("PORT", "10000")),
         startup_grace=int(e("STARTUP_GRACE", "20")),
+        apify_concurrency=int(e("APIFY_CONCURRENCY", "3")),
+        apify_delay=float(e("APIFY_DELAY", "1.5")),
+        apify_proxy=e("APIFY_PROXY", "").lower() in ("1", "true", "yes", "on"),
     )

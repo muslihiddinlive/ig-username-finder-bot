@@ -339,3 +339,49 @@ def test_probe_channel_reports_cause_and_chan_parsing():
     assert "administrator" in out and "edit_messages=False" in out
     assert _chan("-1001234567890") == -1001234567890 and _chan(" @mydb ") == "@mydb" and _chan("") == 0
     assert _chan('"-100555"\n') == -100555
+
+
+def test_apify_null_results_explain_the_cause(monkeypatch):
+    import checkers
+
+    items = [{"username": "aa", "platform": "Instagram", "available": None, "error": "HTTP 429 rate limited"},
+             {"username": "bb", "platform": "Instagram", "available": None, "error": "HTTP 429 rate limited"}]
+
+    class Resp:
+        status = 200
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def json(self):
+            return items
+
+    class Sess:
+        def __init__(self, *a, **k):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        def post(self, url, json=None, **k):
+            Sess.body = json
+            return Resp()
+
+    monkeypatch.setattr(checkers.aiohttp, "ClientSession", Sess)
+    store = Store()
+    ck = checkers.ApifyChecker("tok", "a/b", 100, store, concurrency=2, delay=2.0, proxy=True)
+    p = Pipeline([ck])
+    out = asyncio.run(p.check(["aa", "bb"]))
+    assert out["aa"] == (UNKNOWN, False)
+    assert "429" in p.last_error and "2/2 natija null" in p.last_error
+    assert Sess.body["concurrency"] == 2 and Sess.body["delayBetweenRequests"] == 2.0
+    assert Sess.body["proxyConfiguration"] == {"useApifyProxy": True}
+    items[:] = [{"username": "aa", "platform": "GitHub", "available": True}]
+    asyncio.run(p.check(["aa"]))
+    assert "Instagram natijalari qaytmadi" in p.last_error

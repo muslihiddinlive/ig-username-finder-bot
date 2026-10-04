@@ -24,7 +24,8 @@ def build_checkers(cfg, store):
         if name == "probe":
             out.append(ProbeChecker(cfg.proxies_file))
         elif name == "apify":
-            out.append(ApifyChecker(cfg.apify_token, cfg.apify_actor, cfg.apify_monthly_budget, store))
+            out.append(ApifyChecker(cfg.apify_token, cfg.apify_actor, cfg.apify_monthly_budget, store,
+                                    cfg.apify_concurrency, cfg.apify_delay, cfg.apify_proxy))
     return out
 
 

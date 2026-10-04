@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from collections import Counter
 import logging
 import os
 import random
@@ -21,8 +22,10 @@ class ApifyChecker:
     name = "apify"
     authoritative = True  # 'free' natijasi pul yechish uchun yetarli
 
-    def __init__(self, token: str, actor: str, budget: int, store):
+    def __init__(self, token: str, actor: str, budget: int, store, concurrency: int = 3, delay: float = 1.5, proxy: bool = False):
         self.token, self.actor, self.budget, self.store = token, actor.replace("/", "~"), budget, store
+        self.concurrency, self.delay, self.proxy = concurrency, delay, proxy
+        self.last_reason = ""
         self._sem = asyncio.Semaphore(2)
         self.last_debug = ""
 
@@ -33,7 +36,10 @@ class ApifyChecker:
         if not self.available(len(names)):
             raise CheckerError("apify byudjet/token yo'q")
         url = f"https://api.apify.com/v2/acts/{self.actor}/run-sync-get-dataset-items"
-        body = {"usernames": ",".join(names), "platforms": "instagram", "concurrency": 10, "delayBetweenRequests": 0.3}
+        body = {"usernames": ",".join(names), "platforms": "instagram",
+                "concurrency": self.concurrency, "delayBetweenRequests": self.delay}
+        if self.proxy:
+            body["proxyConfiguration"] = {"useApifyProxy": True}
         async with self._sem:
             self.store.apify_spend(len(names))  # oldindan band qilamiz, xato bo'lsa qaytaramiz
             try:
@@ -47,10 +53,26 @@ class ApifyChecker:
                         sample = items[:3] if isinstance(items, list) else items
                         self.last_debug = (f"HTTP {r.status}; elementlar={len(items) if isinstance(items, list) else type(items).__name__}"
                                            f"; namuna={json.dumps(sample, ensure_ascii=False)[:500]}")
+                        self.last_reason = _explain(items)
             except BaseException:
                 self.store.apify_spend(-len(names))
                 raise
         return parse_apify_items(items, names)
+
+
+def _explain(items) -> str:
+    """Nega natijalar 'noma'lum' ekanini qisqa matnda tushuntiradi (aktorning `error` maydonidan)."""
+    if not isinstance(items, list):
+        return f"kutilmagan javob turi: {type(items).__name__}"
+    ig = [it for it in items if "instagram" in str(it.get("platform", "")).lower()]
+    if not ig:
+        plats = sorted({str(it.get("platform", "?")) for it in items})[:5]
+        return f"Instagram natijalari qaytmadi (kelgan platformalar: {plats or 'yo`q'})"
+    nulls = [it for it in ig if it.get("available") is None]
+    if not nulls:
+        return ""
+    errs = Counter(str(it.get("error") or "error maydoni bo'sh")[:110] for it in nulls)
+    return f"{len(nulls)}/{len(ig)} natija null: " + "; ".join(f"{n}× {e}" for e, n in errs.most_common(2))
 
 
 def parse_apify_items(items: list, names: list[str]) -> dict[str, str]:
@@ -131,6 +153,9 @@ class Pipeline:
                 log.warning("%s xato: %s", ck.name, e)
                 self.last_error = f"{ck.name}: {str(e)[:150]}"
                 continue
+            if ck.authoritative and all(v == UNKNOWN for v in res.values()):
+                why = getattr(ck, "last_reason", "")
+                self.last_error = f"{ck.name}: barcha natijalar noma'lum" + (f" — {why}" if why else "")
             nxt = []
             for n in pending:
                 st = res.get(n, UNKNOWN)
