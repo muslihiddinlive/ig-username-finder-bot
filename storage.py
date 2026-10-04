@@ -70,7 +70,11 @@ class Store:
 
     # --- VIP
     def is_vip(self, uid: int) -> bool:
-        return self.user(uid)["vip_until"] > time.time()
+        return self.is_superadmin(uid) or self.user(uid)["vip_until"] > time.time()
+
+    def price_for(self, uid: int) -> int:
+        """Superadmin uchun 0 (cheksiz), boshqalar uchun admin belgilagan narx."""
+        return 0 if self.is_superadmin(uid) else int(self.settings["price_per_found"])
 
     def grant_vip(self, uid: int, days: int):
         u = self.user(uid)

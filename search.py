@@ -59,6 +59,9 @@ class Searcher:
         self.active: dict[int, Job] = {}
         self.sem = asyncio.Semaphore(max_parallel)
 
+    def _bal(self, uid: int) -> str:
+        return "∞" if self.store.is_superadmin(uid) else f"{self.store.balance(uid)}⭐"
+
     def stop(self, uid: int) -> bool:
         job = self.active.get(uid)
         if job:
@@ -71,7 +74,7 @@ class Searcher:
             return
         job = Job()
         self.active[uid] = job
-        price = int(self.store.settings["price_per_found"])
+        price = self.store.price_for(uid)
         kb = InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text="⏹ To'xtatish", callback_data="stop")]])
         msg = await bot.send_message(chat_id, f"🔎 {title}\nBoshlanmoqda…", reply_markup=kb)
         checked = found = unknown_streak = 0
@@ -91,12 +94,12 @@ class Searcher:
                         if st == TAKEN:
                             self.store.mark_taken(name)
                         elif st == FREE and verified:
-                            if not self.store.debit(uid, price, "found", ref=name):
+                            if price and not self.store.debit(uid, price, "found", ref=name):
                                 reason, done = "balans tugadi", True
                                 break
                             found += 1
                             charged += price
-                            await bot.send_message(chat_id, f"✅ <code>{html.escape(name)}</code>  (−{price}⭐)")
+                            await bot.send_message(chat_id, f"✅ <code>{html.escape(name)}</code>" + (f"  (−{price}⭐)" if price else ""))
                             if max_found and found >= max_found:
                                 reason, done = "so'ralgan miqdor topildi", True
                                 break
@@ -108,7 +111,7 @@ class Searcher:
                     if unknown_streak >= 3:
                         reason = "tekshiruv xizmati javob bermayapti"
                         break
-                    if self.store.balance(uid) < price:
+                    if price and self.store.balance(uid) < price:
                         reason = "balans tugadi"
                         break
                     if checked >= self.cfg.max_checks:
@@ -116,7 +119,7 @@ class Searcher:
                         break
                     try:
                         await bot.edit_message_text(
-                            f"🔎 {title}\nTekshirildi: {checked} | Topildi: {found}\nBalans: {self.store.balance(uid)}⭐",
+                            f"🔎 {title}\nTekshirildi: {checked} | Topildi: {found}\nBalans: {self._bal(uid)}",
                             chat_id=chat_id, message_id=msg.message_id, reply_markup=kb)
                     except TelegramBadRequest:
                         pass
@@ -131,4 +134,4 @@ class Searcher:
             pass
         await bot.send_message(
             chat_id,
-            f"Qidiruv yakunlandi: {reason}.\nTopildi: {found} ta, yechildi: {charged}⭐\nBalans: {self.store.balance(uid)}⭐")
+            f"Qidiruv yakunlandi: {reason}.\nTopildi: {found} ta, yechildi: {charged}⭐\nBalans: {self._bal(uid)}")

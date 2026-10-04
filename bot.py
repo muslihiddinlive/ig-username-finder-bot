@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import html
+import re
 import secrets
 import time
 from dataclasses import dataclass, field
@@ -18,6 +19,10 @@ from search import Searcher, ai_batches, spec_batches
 
 ANY_FREE_SLOTS = (2, 3, 4)
 TYPE_LABELS = {"letter": "Harf (a-z)", "digit": "Raqam", "us": "_ pastki chiziq", "dot": ". nuqta"}
+
+
+class A(StatesGroup):
+    input = State()
 
 
 class S(StatesGroup):
@@ -59,6 +64,9 @@ def build_router(ctx: Ctx) -> Router:
 
     async def show_menu(m: Message, uid: int):
         u = st.user(uid, m.from_user.full_name if m.from_user else "")
+        if st.is_superadmin(uid):
+            return await m.answer("Salom, superadmin! Qidiruv va bAI siz uchun <b>cheksiz va bepul</b>. Boshqaruv: /admin",
+                                  reply_markup=menu_kb(True))
         await m.answer(f"Salom! Balans: <b>{u['balance']}⭐</b>\nBitta topilgan bo'sh username: <b>{price()}⭐</b> "
                        f"(topilmasa pul yechilmaydi).", reply_markup=menu_kb(st.is_vip(uid)))
 
@@ -117,7 +125,7 @@ def build_router(ctx: Ctx) -> Router:
     @r.callback_query(F.data == "menu:search")
     async def menu_search(c: CallbackQuery, state: FSMContext):
         await c.answer()
-        if st.balance(c.from_user.id) < price():
+        if st.balance(c.from_user.id) < st.price_for(c.from_user.id):
             await c.message.answer(f"Balans yetarli emas (kamida {price()}⭐ kerak). Avval to'ldiring.")
             return await send_topup(c.message)
         await state.clear()
@@ -141,7 +149,7 @@ def build_router(ctx: Ctx) -> Router:
         await m.answer(f"Belgi limiti qancha bo'lsin? (so'z {fixed} belgi)", reply_markup=kb([
             [("Farqi yo'q", "lim:any"), (str(cfg.preset_limit), "lim:preset"), ("O'zim kiritaman", "lim:custom")]]))
 
-    @r.message(S.word)
+    @r.message(S.word, ~F.text.startswith("/"))
     async def got_word(m: Message, state: FSMContext):
         w = normalize_word(m.text or "")
         if not valid_word(w):
@@ -153,7 +161,7 @@ def build_router(ctx: Ctx) -> Router:
         await state.set_state(None)
         await ask_limit(m, state)
 
-    @r.message(S.word2)
+    @r.message(S.word2, ~F.text.startswith("/"))
     async def got_word2(m: Message, state: FSMContext):
         w = normalize_word(m.text or "")
         if not valid_word(w):
@@ -184,7 +192,7 @@ def build_router(ctx: Ctx) -> Router:
         await state.update_data(limit=limit, types=[])
         await ask_types(c.message, state)
 
-    @r.message(S.custom)
+    @r.message(S.custom, ~F.text.startswith("/"))
     async def got_custom(m: Message, state: FSMContext):
         d = await state.get_data()
         t = (m.text or "").strip()
@@ -238,12 +246,12 @@ def build_router(ctx: Ctx) -> Router:
         if not st.is_vip(c.from_user.id):
             return await c.message.answer(f"bAI — VIP tarif: {st.settings['vip_price']}⭐ / {st.settings['vip_days']} kun.",
                                           reply_markup=kb([[("VIP sotib olish", "buyvip")]]))
-        if st.balance(c.from_user.id) < price():
+        if st.balance(c.from_user.id) < st.price_for(c.from_user.id):
             return await c.message.answer("Balans yetarli emas. /start → to'ldiring.")
         await state.set_state(S.ai)
         await c.message.answer("Qanday username kerak? Erkin yozing. Masalan: «10 xonali, UZB qatnashgan, belgilar kam, developerlarga»")
 
-    @r.message(S.ai)
+    @r.message(S.ai, ~F.text.startswith("/"))
     async def ai_request(m: Message, state: FSMContext):
         await state.clear()
         if not st.is_vip(m.from_user.id):
@@ -321,28 +329,116 @@ def build_router(ctx: Ctx) -> Router:
         st.credit(int(parts[0]), int(parts[1]), "grant", ref=str(m.from_user.id))
         await m.answer("Balans o'zgartirildi")
 
-    @r.message(Command("stats"))
-    async def stats(m: Message):
-        if not adm(m):
-            return
+    def stats_text() -> str:
         users = st.d["users"]
-        await m.answer(f"Foydalanuvchilar: {len(users)}\nUmumiy balans: {sum(u['balance'] for u in users.values())}⭐\n"
-                       f"VIP: {sum(1 for u in users.values() if u['vip_until'] > time.time())}\n"
-                       f"Apify oy limiti qoldi: {st.apify_left(cfg.apify_monthly_budget)}\n"
-                       f"Band keshi: {len(st.d['taken'])}\nFaol qidiruvlar: {len(ctx.searcher.active)}")
+        return (f"📊 Foydalanuvchilar: {len(users)}\nUmumiy balans: {sum(u['balance'] for u in users.values())}⭐\n"
+                f"VIP: {sum(1 for u in users.values() if u['vip_until'] > time.time())}\n"
+                f"Apify oy limiti qoldi: {st.apify_left(cfg.apify_monthly_budget)}\n"
+                f"Band keshi: {len(st.d['taken'])}\nFaol qidiruvlar: {len(ctx.searcher.active)}")
 
-    @r.message(Command("selftest"))
-    async def selftest(m: Message):
+    async def do_selftest(m: Message):
         """Tekshiruv aniqligini sinash: mashhur (band) va tasodifiy uzun (bo'sh bo'lishi kerak) nomlar."""
-        if not adm(m):
-            return
         taken = ["instagram", "cristiano", "google", "nike"]
         free = ["zq" + secrets.token_hex(6) + "x" + secrets.token_hex(3), "uz" + secrets.token_hex(7) + "k"]
         res = await ctx.pipeline.check(taken + free)
+
         def ok(n):
             return (n in taken and res[n][0] == "taken") or (n in free and res[n][0] == "free")
 
         lines = [f"{'✅' if ok(n) else '❌'} {n}: {res[n][0]}{' (tasdiqlangan)' if res[n][1] else ''}" for n in taken + free]
         await m.answer("Selftest (kutilgan: birinchi 4 ta taken, oxirgi 2 ta free):\n" + "\n".join(lines))
+
+    @r.message(Command("stats"))
+    async def stats(m: Message):
+        if adm(m):
+            await m.answer(stats_text())
+
+    @r.message(Command("selftest"))
+    async def selftest(m: Message):
+        if adm(m):
+            await do_selftest(m)
+
+    # ---------- /admin paneli ----------
+    PROMPTS = {
+        "price": "Yangi narxni yozing (1 ta topilgan username uchun ⭐, butun son):",
+        "packages": "Paketlarni vergul bilan yozing. Masalan: 10,25,50,100",
+        "grant": "Foydalanuvchi ID va miqdorni yozing. Masalan: 123456789 100 (minus ham mumkin)",
+        "vipprice": "VIP narxini yozing (⭐):",
+        "vipdays": "VIP muddatini yozing (kun):",
+        "addadmin": "Yangi admin Telegram ID'sini yozing:",
+        "deladmin": "O'chiriladigan admin ID'sini yozing:",
+    }
+    SUPER_ONLY = {"vipprice", "vipdays", "addadmin", "deladmin", "admins"}
+
+    def panel_text(uid: int) -> str:
+        s = st.settings
+        t = (f"🛠 <b>Admin panel</b>\nNarx (1 topilma): <b>{s['price_per_found']}⭐</b>\n"
+             f"Paketlar: {', '.join(str(p) for p in s['packages'])}\n")
+        if st.is_superadmin(uid):
+            t += f"VIP: <b>{s['vip_price']}⭐</b> / {s['vip_days']} kun\n"
+        return t
+
+    def panel_kb(uid: int):
+        rows = [[("📊 Statistika", "adm:stats"), ("🧪 Selftest", "adm:selftest")],
+                [("💲 Narx", "adm:price"), ("📦 Paketlar", "adm:packages")],
+                [("➕ Balans berish", "adm:grant")]]
+        if st.is_superadmin(uid):
+            rows += [[("💎 VIP narxi", "adm:vipprice"), ("📅 VIP kunlari", "adm:vipdays")], [("👤 Adminlar", "adm:admins")]]
+        return kb(rows)
+
+    @r.message(Command("admin"))
+    async def admin_cmd(m: Message, state: FSMContext):
+        if not adm(m):
+            return
+        await state.clear()
+        await m.answer(panel_text(m.from_user.id), reply_markup=panel_kb(m.from_user.id))
+
+    @r.callback_query(F.data.startswith("adm:"))
+    async def adm_cb(c: CallbackQuery, state: FSMContext):
+        uid, act = c.from_user.id, c.data[4:]
+        if not st.is_admin(uid):
+            return await c.answer("Ruxsat yo'q", show_alert=True)
+        if act in SUPER_ONLY and not st.is_superadmin(uid):
+            return await c.answer("Faqat superadmin uchun", show_alert=True)
+        await c.answer()
+        if act == "stats":
+            return await c.message.answer(stats_text())
+        if act == "selftest":
+            return await do_selftest(c.message)
+        if act == "admins":
+            lst = ", ".join(str(a) for a in st.d["admins"]) or "yo'q"
+            return await c.message.answer(f"Superadminlar: {sorted(st.superadmins)}\nAdminlar: {lst}",
+                                          reply_markup=kb([[("➕ Qo'shish", "adm:addadmin"), ("➖ O'chirish", "adm:deladmin")]]))
+        if act in PROMPTS:
+            await state.set_state(A.input)
+            await state.update_data(act=act)
+            await c.message.answer(PROMPTS[act] + "\n(Bekor qilish: /admin)")
+
+    @r.message(A.input, ~F.text.startswith("/"))
+    async def adm_input(m: Message, state: FSMContext):
+        uid = m.from_user.id
+        act = (await state.get_data()).get("act")
+        if not st.is_admin(uid) or (act in SUPER_ONLY and not st.is_superadmin(uid)):
+            return await state.clear()
+        nums = [int(x) for x in re.findall(r"-?\d+", m.text or "")]
+        if act == "price" and len(nums) == 1 and nums[0] >= 0:
+            st.set_setting("price_per_found", nums[0])
+        elif act == "packages" and nums and min(nums) >= 1:
+            st.set_setting("packages", sorted(set(nums)))
+        elif act == "grant" and len(nums) == 2 and st.balance(nums[0]) + nums[1] >= 0:
+            st.credit(nums[0], nums[1], "grant", ref=str(uid))
+        elif act == "vipprice" and len(nums) == 1 and nums[0] >= 1:
+            st.set_setting("vip_price", nums[0])
+        elif act == "vipdays" and len(nums) == 1 and nums[0] >= 1:
+            st.set_setting("vip_days", nums[0])
+        elif act == "addadmin" and len(nums) == 1:
+            st.add_admin(nums[0])
+        elif act == "deladmin" and len(nums) == 1:
+            st.del_admin(nums[0])
+        else:
+            return await m.answer("Format noto'g'ri. Qayta yozing yoki /admin bilan bekor qiling.")
+        await state.clear()
+        await m.answer("✅ Saqlandi")
+        await m.answer(panel_text(uid), reply_markup=panel_kb(uid))
 
     return r

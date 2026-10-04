@@ -163,3 +163,34 @@ def test_superadmin_ids_parsing():
     for raw in ["111,222,333", "111, 222, 333", "111 222 333", "111\n222\n333", "111;222 ; 333\r\n", "[111, 222, 333]"]:
         assert _ids(raw) == want, raw
     assert _ids("") == set() and _ids(None) == set()
+
+
+def test_superadmin_unlimited_and_free():
+    store = Store({7})
+    assert store.is_vip(7) and store.price_for(7) == 0 and store.balance(7) == 0
+    assert not store.is_vip(8) and store.price_for(8) == 1
+    cfg = mkcfg()
+    free = {"uzbaa", "uzbbb", "uzbcc", "uzbdd", "uzbee"}
+    api = Fake("api", {}, True)
+
+    async def cb(names):
+        return {n: (FREE if n in free else TAKEN) for n in names}
+
+    api.check_batch = cb
+    searcher = Searcher(cfg, store, Pipeline([api]))
+    spec = SearchSpec("starts", "uzb", free=2, types=("letter",), require_each=True)
+    bot = FakeBot()
+    asyncio.run(searcher.run(bot, 1, 7, spec_batches(cfg, store, [spec]), "t"))
+    found = [m for m in bot.sent if m.startswith("✅")]
+    assert len(found) == 5 and all("⭐" not in m for m in found)  # balans 0 bo'lsa ham hammasi topildi, pul yechilmadi
+    assert store.balance(7) == 0 and "∞" in bot.sent[-1]
+
+
+def test_router_builds_with_admin_panel():
+    from bot import Ctx, build_router
+    cfg = mkcfg()
+    st = Store({1})
+    ctx = Ctx(cfg, st, None, Pipeline([]), Searcher(cfg, st, Pipeline([])))
+    r = build_router(ctx)
+    names = {h.callback.__name__ for o in r.observers.values() for h in o.handlers}
+    assert {"admin_cmd", "adm_cb", "adm_input", "selftest", "stats"} <= names
