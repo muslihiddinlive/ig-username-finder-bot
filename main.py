@@ -30,6 +30,7 @@ async def main():
     cfg = load()
     if not cfg.bot_token:
         raise SystemExit("BOT_TOKEN yo'q")
+    logging.info("Superadminlar (%d): %s", len(cfg.superadmins), sorted(cfg.superadmins))
     bot = Bot(cfg.bot_token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     store = Store(cfg.superadmins)
     persist = ChannelPersistence(bot, cfg.db_channel_id, store)

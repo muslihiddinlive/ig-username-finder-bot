@@ -155,3 +155,11 @@ def test_max_found_cap():
     free = {"uzbaa", "uzbbb", "uzbcc"}
     store, bot = run_search(balance=100, free_set=free, price=1, max_found=1)
     assert sum(m.startswith("✅") for m in bot.sent) == 1 and store.balance(7) == 99
+
+
+def test_superadmin_ids_parsing():
+    from config import _ids
+    want = {111, 222, 333}
+    for raw in ["111,222,333", "111, 222, 333", "111 222 333", "111\n222\n333", "111;222 ; 333\r\n", "[111, 222, 333]"]:
+        assert _ids(raw) == want, raw
+    assert _ids("") == set() and _ids(None) == set()

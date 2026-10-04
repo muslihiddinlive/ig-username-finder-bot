@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 
 
 def _ids(v: str) -> set[int]:
-    return {int(x) for x in v.replace(" ", "").split(",") if x.lstrip("-").isdigit()}
+    """Vergul, probel, yangi qator, nuqtali vergul — qaysi ajratgich bilan yozilsa ham ID'larni topadi."""
+    return {int(x) for x in re.findall(r"-?\d+", v or "")}
 
 
 @dataclass(frozen=True)
