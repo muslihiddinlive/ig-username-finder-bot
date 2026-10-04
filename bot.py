@@ -217,7 +217,7 @@ def build_router(ctx: Ctx) -> Router:
         else:
             sel.add(key)
             free = None if d.get("limit") is None else d["limit"] - d["fixed"]
-            if cfg.require_each and free is not None and len(sel) > free:
+            if cfg.require_each_type and free is not None and len(sel) > free:
                 return await c.answer(f"⚠️ Kiritgan limitingizdan oshib ketdingiz: {free} ta bo'sh joyga {len(sel)} xil belgi sig'maydi.", show_alert=True)
         await state.update_data(types=sorted(sel))
         rows = [[(("✅ " if k in sel else "") + lbl, f"cs:{k}")] for k, lbl in TYPE_LABELS.items()] + [[("Davom etish ▶️", "cs:go")]]
@@ -227,7 +227,7 @@ def build_router(ctx: Ctx) -> Router:
     async def launch_search(c: CallbackQuery, state: FSMContext):
         d = await state.get_data()
         frees = ANY_FREE_SLOTS if d.get("limit") is None else (d["limit"] - d["fixed"],)
-        specs = [SearchSpec(d["mode"], d["word"], d.get("word2", ""), f, tuple(d["types"]), cfg.require_each) for f in frees]
+        specs = [SearchSpec(d["mode"], d["word"], d.get("word2", ""), f, tuple(d["types"]), cfg.require_each_type) for f in frees]
         specs = [s for s in specs if s.feasible()]
         await state.clear()
         if not specs:
