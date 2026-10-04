@@ -48,7 +48,7 @@ class FakeSession(BaseSession):
 
 
 class Env:
-    def __init__(self, uid=5, superadmins=(), balance=10, price=1, free=(), cfg=None):
+    def __init__(self, uid=5, superadmins=(), balance=10, price=1, free=(), cfg=None, delay=0):
         self.uid = uid
         self.cfg = cfg or mkcfg()
         self.store = Store(set(superadmins))
@@ -58,6 +58,8 @@ class Env:
         fr = set(free)
 
         async def cb(names):
+            if delay:
+                await asyncio.sleep(delay)
             return {n: (FREE if n in fr else TAKEN) for n in names}
 
         api = Fake("api", {}, True)
@@ -202,4 +204,44 @@ def test_bai_flow_with_mocked_ai(monkeypatch):
         await e.say("6 xonali uzb developer")
         await e.wait_search()
         assert any(t.startswith("✅") and "uzbdev" in t for t in e.session.texts())
+    run(go())
+
+
+def test_stop_button_cancels_running_search_in_realtime():
+    import time
+    from aiogram.types import ReplyKeyboardMarkup, ReplyKeyboardRemove
+    from search import STOP_TEXT
+
+    async def go():
+        e = Env(free={"uz111"}, delay=30)   # tekshiruv so'rovi 30 soniya "qotib" qoladi
+        await e.say("/start")
+        await e.press("menu:search")
+        await e.press("m:starts")
+        await e.say("uz")
+        await e.press("lim:custom")
+        await e.say("5")
+        await e.press("cs:digit")
+        await e.press("cs:go")
+        await asyncio.sleep(0.2)
+        assert 5 in e.searcher.active
+        t0 = time.time()
+        await e.say(STOP_TEXT)
+        await e.wait_search(timeout=3)
+        assert time.time() - t0 < 2                      # 30 soniya kutmadi
+        sends = [c for c in e.session.calls if type(c).__name__ == "SendMessage"]
+        assert any(isinstance(c.reply_markup, ReplyKeyboardMarkup) and c.text.startswith("🔎") for c in sends)
+        assert isinstance(sends[-1].reply_markup, ReplyKeyboardRemove) and "to'xtatildi" in sends[-1].text
+        assert e.store.balance(5) == 10                  # pul yechilmadi
+    run(go())
+
+
+def test_stop_button_without_active_search_and_budget_message():
+    from aiogram.types import ReplyKeyboardRemove
+    from search import STOP_TEXT
+
+    async def go():
+        e = Env()
+        await e.say(STOP_TEXT)
+        last = [c for c in e.session.calls if type(c).__name__ == "SendMessage"][-1]
+        assert "Faol qidiruv yo'q" in last.text and isinstance(last.reply_markup, ReplyKeyboardRemove)
     run(go())

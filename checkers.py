@@ -98,6 +98,10 @@ class Pipeline:
     def __init__(self, checkers: list):
         self.checkers = checkers
 
+    def has_verifier(self, n: int) -> bool:
+        """Kamida bitta ishonchli (tasdiqlovchi) tekshiruvchi hozir ishlay oladimi."""
+        return any(ck.authoritative and ck.available(n) for ck in self.checkers)
+
     async def check(self, names: list[str]) -> dict[str, tuple[str, bool]]:
         """name -> (status, verified). verified=True faqat ishonchli manba tasdiqlaganda."""
         result: dict[str, tuple[str, bool]] = {}

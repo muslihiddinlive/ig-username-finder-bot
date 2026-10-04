@@ -12,10 +12,10 @@ from aiogram.filters import Command, CommandObject, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LabeledPrice, Message,
-                           PreCheckoutQuery)
+                           PreCheckoutQuery, ReplyKeyboardRemove)
 
 from generator import SearchSpec, normalize_word, is_valid_username
-from search import Searcher, ai_batches, spec_batches
+from search import STOP_TEXT, Searcher, ai_batches, spec_batches
 
 ANY_FREE_SLOTS = (2, 3, 4)
 TYPE_LABELS = {"letter": "Harf (a-z)", "digit": "Raqam", "us": "_ pastki chiziq", "dot": ". nuqta"}
@@ -74,6 +74,14 @@ def build_router(ctx: Ctx) -> Router:
     async def start(m: Message, state: FSMContext):
         await state.clear()
         await show_menu(m, m.from_user.id)
+
+    @r.message(F.text == STOP_TEXT)
+    async def stop_button(m: Message):
+        """Klaviatura tugmasi: faol qidiruvni darrov to'xtatadi (admin ham, oddiy user ham)."""
+        if ctx.searcher.stop(m.from_user.id):
+            await m.answer("⏹ To'xtatilmoqda…")
+        else:
+            await m.answer("Faol qidiruv yo'q.", reply_markup=ReplyKeyboardRemove())
 
     # ---------- to'ldirish ----------
     async def send_topup(m: Message):
@@ -236,7 +244,7 @@ def build_router(ctx: Ctx) -> Router:
         asyncio.create_task(ctx.searcher.run(c.bot, c.message.chat.id, c.from_user.id, spec_batches(cfg, st, specs), title))
 
     @r.callback_query(F.data == "stop")
-    async def stop(c: CallbackQuery):
+    async def stop(c: CallbackQuery):  # eski xabarlardagi inline tugma uchun
         await c.answer("To'xtatilmoqda…" if ctx.searcher.stop(c.from_user.id) else "Faol qidiruv yo'q")
 
     # ---------- bAI ----------
