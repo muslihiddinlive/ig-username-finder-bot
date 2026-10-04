@@ -4,7 +4,7 @@ Bo'sh Instagram username qidiruvchi bot. Stars bilan to'lov, **faqat topilgan (t
 DB: Telegram kanal (pinned `snapshot.json`), kerakli joyda RAM.
 
 ## Ishga tushirish
-1. @BotFather'dan bot oching. Alohida **private kanal** yarating, botni admin qiling (Post / Pin / Delete messages). Kanal ID'si `-100…`.
+1. @BotFather'dan bot oching. Alohida **private kanal** yarating, botni admin qiling (Post messages, Edit messages of others, Delete messages of others). Kanal ID'si `-100…`.
 2. `cp .env.example .env`, to'ldiring (`BOT_TOKEN`, `DB_CHANNEL_ID`, `SUPERADMIN_IDS`, `APIFY_TOKEN`).
 3. `pip install -r requirements.txt && set -a && . ./.env && set +a && python main.py`
 4. Admin bo'lib `/selftest` yuboring: tekshiruv aniqligini ko'rsatadi. **Bunisiz ishga tushirmang.**

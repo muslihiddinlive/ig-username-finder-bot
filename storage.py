@@ -253,3 +253,24 @@ class ChannelPersistence:
                 await self._drain_log()
             except Exception:
                 log.exception("persistence xatosi")
+
+
+async def probe_channel(bot, channel_id) -> str:
+    """Kanal ulanishini jonli tekshiradi va aniq sababni qaytaradi."""
+    try:
+        chat = await bot.get_chat(channel_id)
+    except Exception as e:  # noqa: BLE001
+        return f"get_chat XATO: {e}"
+    try:
+        me = await bot.get_me()
+        mem = await bot.get_chat_member(channel_id, me.id)
+    except Exception as e:  # noqa: BLE001
+        return f"kanal topildi ({getattr(chat, 'title', '?')}, id={chat.id}), lekin bot a'zoligini bilib bo'lmadi: {e}"
+    status = getattr(mem, "status", "?")
+    info = f"kanal: {getattr(chat, 'title', '?')} (id={chat.id}, {getattr(chat, 'type', '?')}); bot statusi: {status}"
+    if status == "administrator":
+        perms = {k: getattr(mem, k, None) for k in ("can_post_messages", "can_edit_messages", "can_delete_messages", "can_pin_messages")}
+        info += "; huquqlar: " + ", ".join(f"{k[4:]}={v}" for k, v in perms.items())
+    elif status != "creator":
+        info += " (bot ADMIN emas!)"
+    return info

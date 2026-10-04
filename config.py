@@ -5,6 +5,15 @@ import re
 from dataclasses import dataclass
 
 
+def _chan(v: str):
+    """Kanal ID: -100... son yoki ochiq kanal uchun @username."""
+    v = (v or "").strip()
+    if v.startswith("@"):
+        return v
+    m = re.search(r"-?\d+", v)
+    return int(m.group(0)) if m else 0
+
+
 def _ids(v: str) -> set[int]:
     """Vergul, probel, yangi qator, nuqtali vergul — qaysi ajratgich bilan yozilsa ham ID'larni topadi."""
     return {int(x) for x in re.findall(r"-?\d+", v or "")}
@@ -13,7 +22,7 @@ def _ids(v: str) -> set[int]:
 @dataclass(frozen=True)
 class Config:
     bot_token: str
-    db_channel_id: int
+    db_channel_id: object
     superadmins: set
     checkers: tuple
     apify_token: str
@@ -38,7 +47,7 @@ def load() -> Config:
         return os.environ.get(key, default).strip().strip("\"'").strip()
     return Config(
         bot_token=e("BOT_TOKEN", ""),
-        db_channel_id=int(e("DB_CHANNEL_ID", "0") or 0),
+        db_channel_id=_chan(e("DB_CHANNEL_ID", "0")),
         superadmins=_ids(e("SUPERADMIN_IDS", "")),
         checkers=tuple(x.strip() for x in e("CHECKERS", "apify").split(",") if x.strip()),
         apify_token=e("APIFY_TOKEN", ""),

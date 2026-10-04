@@ -312,3 +312,30 @@ def test_channel_persistence_roundtrip_with_fake_bot(tmp_path):
         assert await p3.load() == "fresh" and "DB_CHANNEL_ID" in p3.source
 
     asyncio.run(go())
+
+
+def test_probe_channel_reports_cause_and_chan_parsing():
+    from storage import probe_channel
+    from config import _chan
+
+    class NoChat:
+        async def get_chat(self, cid):
+            raise RuntimeError("Bad Request: chat not found")
+
+    assert "chat not found" in asyncio.run(probe_channel(NoChat(), -1001))
+
+    class Ok:
+        async def get_chat(self, cid):
+            return type("C", (), {"id": cid, "title": "DB", "type": "channel"})()
+
+        async def get_me(self):
+            return type("U", (), {"id": 9})()
+
+        async def get_chat_member(self, cid, uid):
+            return type("M", (), {"status": "administrator", "can_post_messages": True, "can_edit_messages": False,
+                                  "can_delete_messages": True, "can_pin_messages": None})()
+
+    out = asyncio.run(probe_channel(Ok(), -1001))
+    assert "administrator" in out and "edit_messages=False" in out
+    assert _chan("-1001234567890") == -1001234567890 and _chan(" @mydb ") == "@mydb" and _chan("") == 0
+    assert _chan('"-100555"\n') == -100555
